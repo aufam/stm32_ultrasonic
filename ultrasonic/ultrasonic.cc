@@ -6,8 +6,7 @@ using namespace Project;
 fun Ultrasonic::init() -> void {
     trigger.init({.mode=GPIO_MODE_OUTPUT_PP, .pull=GPIO_NOPULL, .speed=GPIO_SPEED_FREQ_HIGH});
     event.init();
-    inputCapture.init();
-    inputCapture.callback = {lambda (Ultrasonic* self) { self->inputCaptureCallback(); }, this};
+    inputCapture.init({.callback=etl::bind<&Ultrasonic::inputCaptureCallback>(this)});
 }
 
 fun Ultrasonic::deinit() -> void {
