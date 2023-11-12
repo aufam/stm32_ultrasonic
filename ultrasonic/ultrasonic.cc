@@ -1,7 +1,6 @@
 #include "ultrasonic/ultrasonic.h"
 #include "etl/keywords.h"
 
-using namespace Project;
 
 fun Ultrasonic::init() -> void {
     trigger.init({.mode=GPIO_MODE_OUTPUT_PP, .pull=GPIO_NOPULL, .speed=GPIO_SPEED_FREQ_HIGH});
