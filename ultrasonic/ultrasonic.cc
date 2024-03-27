@@ -4,8 +4,10 @@
 
 fun Ultrasonic::init() -> void {
     trigger.init({.mode=GPIO_MODE_OUTPUT_PP, .pull=GPIO_NOPULL, .speed=GPIO_SPEED_FREQ_HIGH});
-    event.init();
-    inputCapture.init({.callback=etl::bind<&Ultrasonic::inputCaptureCallback>(this)});
+
+    inputCapture.htim.Instance->PSC = SystemCoreClock / 1'000'000 - 1;
+    inputCapture.htim.Instance->ARR = 0xFFFF - 1;
+    inputCapture.init();
 }
 
 fun Ultrasonic::deinit() -> void {
@@ -13,46 +15,20 @@ fun Ultrasonic::deinit() -> void {
     inputCapture.deinit();
 }
 
-fun Ultrasonic::delayUs(uint32_t us) -> void  {
-    __HAL_TIM_SET_COUNTER(&inputCapture.htim, 0);
-    while (__HAL_TIM_GET_COUNTER(&inputCapture.htim) < us);
-}
+fun Ultrasonic::read() -> etl::Future<float> {
+    return [this] (etl::Time timeout) -> etl::Result<float, osStatus_t> {
+        trigger.on();
+        inputCapture.htim.Instance->CNT = 0; 
+        while (__HAL_TIM_GET_COUNTER(&inputCapture.htim) < 10); // delay 10us
+        trigger.off();
 
-fun Ultrasonic::read() -> float {
-    if (etl::time::elapsed(lastReadTime) < timeout)
-        return distance_;
-    
-    trigger.on();
-    delayUs(10);
-    trigger.off();
+        inputCapture.htim.Instance->CNT = 0; 
+        inputCapture.polarity = TIM_INPUTCHANNELPOLARITY_RISING;
 
-    lastReadTime = etl::time::now();
-    inputCapture.enable();
-    distance_ = NAN;
-    event.waitFlags({.flags=1u << inputCapture.channel, .option=osFlagsWaitAny, .timeout=timeout});
-    inputCapture.disable();
-    return distance_;
-}
-
-fun Ultrasonic::inputCaptureCallback() -> void {
-    auto& channel = inputCapture.channel;
-    auto* htim = &inputCapture.htim;
-
-    if (isRising) {
-        valueRising = HAL_TIM_ReadCapturedValue(htim, channel);
-        isRising = false;
-        __HAL_TIM_SET_CAPTUREPOLARITY(htim, channel, TIM_INPUTCHANNELPOLARITY_FALLING);
-        return;
-    }
-
-    valueFalling = HAL_TIM_ReadCapturedValue(htim, channel);
-    __HAL_TIM_SET_COUNTER(htim, 0);
-    isRising = true;
-
-    auto diff = valueFalling > valueRising ? valueFalling - valueRising : 0xFFFF - valueRising + valueFalling;
-    distance_ = (float) diff * factor;
-
-    __HAL_TIM_SET_CAPTUREPOLARITY(htim, channel, TIM_INPUTCHANNELPOLARITY_RISING);
-    inputCapture.disable();
-    Ultrasonic::event.setFlags(1 << channel);
+        return inputCapture.wait(timeout)
+            .and_then([this, timeout] (uint32_t rising) {
+                inputCapture.polarity = TIM_INPUTCHANNELPOLARITY_FALLING;
+                return (inputCapture.wait(timeout) - rising) * factor;
+            });
+    };
 }
